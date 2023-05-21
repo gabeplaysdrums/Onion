@@ -567,6 +567,9 @@ check_networking() {
             ifconfig wlan0 up
             $miyoodir/app/wpa_supplicant -B -D nl80211 -iwlan0 -c /appconfigs/wpa_supplicant.conf
             udhcpc -i wlan0 -s /etc/init.d/udhcpc.script &
+
+            echo "Killing telnet..."
+            killall -9 telnetd
         fi
     else
         pkill -9 wpa_supplicant
