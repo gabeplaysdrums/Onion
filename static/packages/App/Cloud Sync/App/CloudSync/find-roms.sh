@@ -44,8 +44,8 @@ rm -Rf $TEMP_DIR >/dev/null 2>&1
 process_files() {
     local dir="$1"
     local match="$2"
-    find "$dir" -type f -name "$match" -print0 |
-        while IFS= read -r -d '' line; do
+    find "$dir" -type f -name "$match" -print |
+        while IFS= read -r line; do
             system=$(basename "$(dirname "$line")")
             save_file=$(basename "$line")
 
@@ -70,8 +70,8 @@ process_files() {
 
 process_category() {
     local match=$2
-    find "$PROFILE/$1" -maxdepth 1 -mindepth 1 -type d -print0 |
-    while IFS= read -r -d '' line; do
+    find "$PROFILE/$1" -maxdepth 1 -mindepth 1 -type d -print |
+    while IFS= read -r line; do
         process_files "$line" "$match"
     done
 }
@@ -82,8 +82,8 @@ process_category "states" "*.state*"
 find_matching_roms() {
     local system="$1"
     local rom_prefix="$2"
-    find "$ROMS" -type f -name "${rom_prefix}.*" -print0 |
-        while IFS= read -r -d '' line; do
+    find "$ROMS" -type f -name "${rom_prefix}.*" -print |
+        while IFS= read -r line; do
             log $line
             rom_subpath=${line#*$ROMS/}
 
@@ -99,8 +99,8 @@ find_matching_roms() {
 
 log "Searching for ROMs ..."
 if [ -d "$TEMP_DIR" ]; then
-    find "$TEMP_DIR" -type f -print0 |
-        while IFS= read -r -d '' line; do
+    find "$TEMP_DIR" -type f -print |
+        while IFS= read -r line; do
             system=$(basename "$(dirname "$line")")
             rom_prefix=$(basename "$line")
             log "  system: $system"
