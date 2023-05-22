@@ -1,0 +1,7 @@
+{
+"label":"Cloud Sync",
+"icon":"cloud.png",
+"iconsel":"",
+"launch":"launch.sh",
+"description":"Syncs data with cloud storage"
+}
