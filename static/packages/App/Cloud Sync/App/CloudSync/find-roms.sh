@@ -6,7 +6,7 @@ log() {
     fi
 }
 
-log Finding ROMs in for saves in profile
+log Finding ROMs for saves in profile
 
 PROFILE=
 ROMS=
