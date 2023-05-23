@@ -2,7 +2,8 @@
 echo $0 $*
 
 CONFIG_FILE=/mnt/SDCARD/rclone.conf
-LOG_FILE=/mnt/SDCARD/cloud_sync.log
+LOG_FILE_PREFIX=/mnt/SDCARD/cloud_sync
+LOG_FILE_SUFFIX=.log
 ERROR_FLAG=/tmp/cloud_sync_error
 PROFILE=/mnt/SDCARD/Saves/CurrentProfile
 SYNC_ROMS_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncRoms
@@ -10,6 +11,31 @@ ROMS=/mnt/SDCARD/Roms
 RCLONE_REMOTE=cloud
 CLOUD_DIR=$RCLONE_REMOTE:Onion
 RCLONE_OPTIONS="--no-check-certificate --config=$CONFIG_FILE"
+
+LOG_FILE=
+
+# keep up to 10 log files
+for i in "" ".1" ".2" ".3" ".4" ".5" ".6" ".7" ".8" ".9"; do
+    file="${LOG_FILE_PREFIX}$i${LOG_FILE_SUFFIX}"
+    if [ -f "$file" ]; then
+        continue
+    fi
+    LOG_FILE="$file"
+    break
+done
+
+if [ -z "$LOG_FILE" ]; then
+    echo "Replacing oldest log file"
+    LOG_FILE=$(
+        ls -tr ${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX} | tr '\n' '\n' |
+        while IFS= read -r file; do
+            echo $file
+            break
+        done
+    )
+fi
+
+echo "LOG_FILE: $LOG_FILE"
 
 NAME_FILE=/mnt/SDCARD/name.txt
 NAME=unnamed
