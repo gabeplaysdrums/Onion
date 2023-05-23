@@ -2,8 +2,14 @@
 echo $0 $*
 
 CONFIG_FILE=/mnt/SDCARD/rclone.conf
-LOG_FILE=/mnt/SDCARD/rclone.log
+LOG_FILE=/mnt/SDCARD/cloud_sync.log
 ERROR_FLAG=/tmp/cloud_sync_error
+PROFILE=/mnt/SDCARD/Saves/CurrentProfile
+SYNC_ROMS_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncRoms
+ROMS=/mnt/SDCARD/Roms
+RCLONE_REMOTE=cloud
+CLOUD_DIR=$RCLONE_REMOTE:Onion
+RCLONE_OPTIONS="--no-check-certificate --config=$CONFIG_FILE"
 
 NAME_FILE=/mnt/SDCARD/name.txt
 NAME=unnamed
@@ -15,40 +21,85 @@ echo NAME: $NAME
 
 cd $(dirname "$0")
 
-# Quick time sync fix
-ntpd -N -p 162.159.200.1
-hwclock -w
-sleep 1
+TITLE="Syncing $NAME device"
 
-# rclone
+echo $TITLE >$LOG_FILE
+
+log() {
+    echo $* >>$LOG_FILE
+    echo $*
+}
+
+preload_info_panel() {
+    local MESSAGE=$1
+    local PANEL_TITLE=$2
+
+    if [ -z "$PANEL_TITLE" ]; then
+        PANEL_TITLE=$TITLE
+    fi
+
+    log $MESSAGE
+    LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$PANEL_TITLE" -m "$MESSAGE" --auto &
+}
+
+rm $ERROR_FLAG >/dev/null 2>&1
 
 exit_on_error() {
     local MESSAGE=$1
-    LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "Error" -m "$MESSAGE" --auto &
+    preload_info_panel "$MESSAGE" "Error"
     touch $ERROR_FLAG
     sleep 5
     exit 0
 }
 
+# Quick time sync fix
+preload_info_panel "Syncing clock to network time"
+export TZ=UTC-0
+ntpd -N -p 162.159.200.1 >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
+hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
+sleep 1
+
+# rclone
+preload_info_panel "Checking cloud connection"
+./rclone $RCLONE_OPTIONS -vv lsd ${RCLONE_REMOTE}: >>$LOG_FILE 2>&1 || exit_on_error "Could not verify cloud connection"
+
 sync_dirs() {
-    local TITLE="Syncing $NAME device"
     local WHAT=$1
     local MESSAGE="Syncing $WHAT with the cloud"
     local LOCAL_DIR=$2
     local CLOUD_DIR=$3
-    echo "Title: $TITLE"
-    echo "Message: $MESSAGE"
-    echo "Local dir: $LOCAL_DIR"
-    echo "Cloud dir: $CLOUD_DIR"
+    local OP=$4
 
-    LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$TITLE" -m "$MESSAGE" --auto &
+    if [ -z "$OP" ]; then
+        OP="sync"
+    fi
 
-    rm $ERROR_FLAG >/dev/null 2>&1
-    ./rclone copy -P -L --no-check-certificate --config=$CONFIG_FILE $LOCAL_DIR $CLOUD_DIR >$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
-    ./rclone copy -P -L --no-check-certificate --config=$CONFIG_FILE $CLOUD_DIR $LOCAL_DIR >$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
+    log "LOCAL_DIR: $LOCAL_DIR"
+    log "CLOUD_DIR: $CLOUD_DIR"
+    log "OP: $OP"
+
+    preload_info_panel "$MESSAGE"
+
+    if [ "$OP" = "sync" || "$OP" = "upload" ]; then
+        ./rclone copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
+    fi
+
+    if [ "$OP" = "sync" || "$OP" = "download" ]; then
+        ./rclone copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
+    fi
 }
 
-sync_dirs "saves" "/mnt/SDCARD/Saves/CurrentProfile/saves/" "cloud:Onion/$NAME/saves/"
-sync_dirs "states" "/mnt/SDCARD/Saves/CurrentProfile/states/" "cloud:Onion/$NAME/states/"
-sync_dirs "rom screens" "/mnt/SDCARD/Saves/CurrentProfile/romScreens/" "cloud:Onion/$NAME/romScreens/"
-#sync_dirs "ROMs" "/mnt/SDCARD/Roms/" "cloud:Onion/Roms/"
+sync_dirs "saves" "$PROFILE/saves/" "$CLOUD_DIR/$NAME/saves/"
+sync_dirs "states" "$PROFILE/states/" "$CLOUD_DIR/$NAME/states/"
+sync_dirs "rom screens" "$PROFILE/romScreens/" "$CLOUD_DIR/$NAME/romScreens/"
+
+if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
+    preload_info_panel "Searching for matching ROMs"
+    ./find-roms.sh -p "$PROFILE" -r "$ROMS" |
+        while IFS= read -r rom_subpath; do
+            preload_info_panel "Copying ROMs to the cloud\n$rom_subpath"
+            ./rclone copyto --update -P -L $RCLONE_OPTIONS "$ROMS/$rom_subpath" "$CLOUD_DIR/Roms/$rom_subpath" >>$LOG_FILE 2>&1 || exit_on_error "Failed to upload $rom_subpath"
+        done
+fi
+
+#sync_dirs "ROMs" "$ROMS/" "$CLOUD_DIR/Roms/" "upload"
