@@ -1,5 +1,6 @@
 #!/bin/sh
-echo $0 $*
+
+start=$(date +%s)
 
 CONFIG_FILE=/mnt/SDCARD/rclone.conf
 LOG_FILE_PREFIX=/mnt/SDCARD/cloud_sync
@@ -37,6 +38,13 @@ fi
 
 echo "LOG_FILE: $LOG_FILE"
 
+echo $0 $* >$LOG_FILE
+
+log() {
+    echo $* >>$LOG_FILE
+    echo $*
+}
+
 NAME_FILE=/mnt/SDCARD/name.txt
 NAME=unnamed
 if [ -f "$NAME_FILE" ]; then
@@ -49,12 +57,7 @@ cd $(dirname "$0")
 
 TITLE="Syncing $NAME device"
 
-echo $TITLE >$LOG_FILE
-
-log() {
-    echo $* >>$LOG_FILE
-    echo $*
-}
+log $TITLE
 
 preload_info_panel() {
     local MESSAGE=$1
@@ -78,12 +81,18 @@ exit_on_error() {
     exit 0
 }
 
+now=$(date +%s)
+elapsed_offset=$(expr $now - $start)
+
 # Quick time sync fix
 preload_info_panel "Syncing clock to network time"
 export TZ=UTC-0
-ntpd -N -p 162.159.200.1 >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
+ntpd -n -q -N -p time.nist.gov >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
 hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
-sleep 1
+start=$(date +%s)
+
+TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
+log "Current time is $TIMESTAMP"
 
 # rclone
 preload_info_panel "Checking cloud connection"
@@ -91,7 +100,6 @@ preload_info_panel "Checking cloud connection"
 
 sync_dirs() {
     local WHAT=$1
-    local MESSAGE="Syncing $WHAT with the cloud"
     local LOCAL_DIR=$2
     local CLOUD_DIR=$3
     local OP=$4
@@ -104,13 +112,14 @@ sync_dirs() {
     log "CLOUD_DIR: $CLOUD_DIR"
     log "OP: $OP"
 
-    preload_info_panel "$MESSAGE"
 
     if [ "$OP" = "sync" || "$OP" = "upload" ]; then
+        preload_info_panel "Uploading $WHAT to the cloud"
         ./rclone copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
     fi
 
     if [ "$OP" = "sync" || "$OP" = "download" ]; then
+        preload_info_panel "Downloading $WHAT from the cloud"
         ./rclone copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
     fi
 }
@@ -119,6 +128,9 @@ sync_dirs "saves" "$PROFILE/saves/" "$CLOUD_DIR/$NAME/saves/"
 sync_dirs "states" "$PROFILE/states/" "$CLOUD_DIR/$NAME/states/"
 sync_dirs "rom screens" "$PROFILE/romScreens/" "$CLOUD_DIR/$NAME/romScreens/"
 
+#sync_dirs "ROMs" "$ROMS/" "$CLOUD_DIR/Roms/" "upload"
+
+# Smart sync of matching ROMs
 if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
     preload_info_panel "Searching for matching ROMs"
     ./find-roms.sh -p "$PROFILE" -r "$ROMS" |
@@ -128,4 +140,6 @@ if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
         done
 fi
 
-#sync_dirs "ROMs" "$ROMS/" "$CLOUD_DIR/Roms/" "upload"
+now=$(date +%s)
+elapsed=$(expr $elapsed_offset + $now - $start)
+preload_info_panel "Success!\nSync took $elapsed seconds"
