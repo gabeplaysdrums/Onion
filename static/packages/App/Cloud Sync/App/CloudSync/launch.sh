@@ -2,42 +2,65 @@
 
 start=$(date +%s)
 
+NAME=
 CONFIG_FILE=/mnt/SDCARD/rclone.conf
-LOG_FILE_PREFIX=/mnt/SDCARD/cloud_sync
+LOGS_REL_DIR=logs
+LOG_FILE_PREFIX="cloud_sync"
 LOG_FILE_SUFFIX=.log
+MAX_LOG_FILES=10
 ERROR_FLAG=/tmp/cloud_sync_error
 PROFILE=/mnt/SDCARD/Saves/CurrentProfile
 SYNC_ROMS_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncRoms
 ROMS=/mnt/SDCARD/Roms
 RCLONE_REMOTE=cloud
 CLOUD_DIR=$RCLONE_REMOTE:Onion
-RCLONE_OPTIONS="--no-check-certificate --config=$CONFIG_FILE"
+SCRIPT_DIR=$(dirname "$0")
+WORK_DIR=$SCRIPT_DIR
 
-LOG_FILE=
+show_usage_and_exit() {
+    echo "usage: $(basename $0) [-p profile_directory] [-r roms_directory] [-n device_name] [-w work_dir] [-c rclone_config]"
+    exit 1
+}
 
-# keep up to 10 log files
-for i in "" ".1" ".2" ".3" ".4" ".5" ".6" ".7" ".8" ".9"; do
-    file="${LOG_FILE_PREFIX}$i${LOG_FILE_SUFFIX}"
-    if [ -f "$file" ]; then
-        continue
-    fi
-    LOG_FILE="$file"
-    break
+while getopts 'p:r:n:w:c:' opt; do
+    case "$opt" in
+        p)
+            PROFILE="${OPTARG%/}"
+            ;;
+        r)
+            ROMS="${OPTARG%/}"
+            ;;
+        n)
+            NAME="$OPTARG"
+            ;;
+        w)
+            WORK_DIR="${OPTARG%/}"
+            ;;
+        c)
+            CONFIG_FILE="$OPTARG"
+            ;;
+        ?)
+            show_usage_and_exit
+            ;;
+    esac
 done
+shift "$(($OPTIND -1))"
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Replacing oldest log file"
-    LOG_FILE=$(
-        ls -tr ${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX} | tr '\n' '\n' |
-        while IFS= read -r file; do
-            echo $file
-            break
-        done
-    )
-fi
+abs_path() {
+    if [ -e "$1" ]; then
+        echo $(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+    else
+        echo $1
+    fi
+}
 
+mkdir -p "$WORK_DIR"
+
+LOGS_DIR=$(abs_path "$WORK_DIR/$LOGS_REL_DIR")
+mkdir -p "$LOGS_DIR"
+timestamp=$(date "+%Y%m%d-%H%M%S")
+LOG_FILE="$LOGS_DIR/$LOG_FILE_PREFIX-$timestamp.log"
 echo "LOG_FILE: $LOG_FILE"
-
 echo $0 $* >$LOG_FILE
 
 log() {
@@ -45,18 +68,35 @@ log() {
     echo $*
 }
 
-NAME_FILE=/mnt/SDCARD/name.txt
-NAME=unnamed
-if [ -f "$NAME_FILE" ]; then
-    NAME=$(cat "$NAME_FILE")
+LOGS_PATTERN=${LOGS_DIR}/${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX}
+declare -i log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
+
+while [ $log_count -ge $MAX_LOG_FILES ]; do
+    oldest_log_file=$(ls -tr $LOGS_PATTERN | tr '\n' '\n' | head -1)
+    log "Deleting old log file: $oldest_log_file"
+    rm -f $oldest_log_file
+    log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
+done
+
+RCLONE=$(which rclone)
+if [ $? -ne 0 ]; then
+    RCLONE="$SCRIPT_DIR/rclone"
 fi
+log "RCLONE: $RCLONE"
+CONFIG_FILE=$(abs_path "$CONFIG_FILE")
+log "CONFIG_FILE: $CONFIG_FILE"
+RCLONE_OPTIONS="--no-check-certificate --config=$CONFIG_FILE"
 
-echo NAME: $NAME
-
-cd $(dirname "$0")
+if [ -z "$NAME" ]; then
+    NAME_FILE=/mnt/SDCARD/name.txt
+    NAME=unnamed
+    if [ -f "$NAME_FILE" ]; then
+        NAME=$(cat "$NAME_FILE")
+    fi
+fi
+log "NAME: $NAME"
 
 TITLE="Syncing $NAME device"
-
 log $TITLE
 
 preload_info_panel() {
@@ -68,7 +108,9 @@ preload_info_panel() {
     fi
 
     log $MESSAGE
-    LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$PANEL_TITLE" -m "$MESSAGE" --auto &
+    if [ -f "/mnt/SDCARD/miyoo/lib/libpadsp.so" ]; then
+        LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$PANEL_TITLE" -m "$MESSAGE" --auto &
+    fi
 }
 
 rm $ERROR_FLAG >/dev/null 2>&1
@@ -76,7 +118,7 @@ rm $ERROR_FLAG >/dev/null 2>&1
 exit_on_error() {
     local MESSAGE=$1
     preload_info_panel "$MESSAGE" "Error"
-    touch $ERROR_FLAG
+    touch $ERROR_FLAG >/dev/null 2>&1
     sleep 5
     exit 0
 }
@@ -85,10 +127,13 @@ now=$(date +%s)
 elapsed_offset=$(expr $now - $start)
 
 # Quick time sync fix
-preload_info_panel "Syncing clock to network time"
-export TZ=UTC-0
-ntpd -n -q -N -p time.nist.gov >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
-hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
+if which ntpd; then
+    preload_info_panel "Syncing clock to network time"
+    export TZ=UTC-0
+    ntpd -n -q -N -p time.nist.gov >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
+    hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
+fi
+
 start=$(date +%s)
 
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
@@ -96,47 +141,47 @@ log "Current time is $TIMESTAMP"
 
 # rclone
 preload_info_panel "Checking cloud connection"
-./rclone $RCLONE_OPTIONS -vv lsd ${RCLONE_REMOTE}: >>$LOG_FILE 2>&1 || exit_on_error "Could not verify cloud connection"
+"$RCLONE" $RCLONE_OPTIONS -vv lsd ${RCLONE_REMOTE}: >>$LOG_FILE 2>&1 || exit_on_error "Could not verify cloud connection"
 
 sync_dirs() {
     local WHAT=$1
-    local LOCAL_DIR=$2
-    local CLOUD_DIR=$3
-    local OP=$4
+    local REL_DIR=$2
+    local OP=$3
 
     if [ -z "$OP" ]; then
         OP="sync"
     fi
 
+    local LOCAL_DIR=$(abs_path "$PROFILE/$REL_DIR")
     log "LOCAL_DIR: $LOCAL_DIR"
+    local CLOUD_DIR="$CLOUD_DIR/$NAME/$REL_DIR"
     log "CLOUD_DIR: $CLOUD_DIR"
     log "OP: $OP"
 
-
-    if [ "$OP" = "sync" || "$OP" = "upload" ]; then
+    if [ "$OP" = "sync" ] || [ "$OP" = "upload" ]; then
         preload_info_panel "Uploading $WHAT to the cloud"
-        ./rclone copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
+        "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
     fi
 
-    if [ "$OP" = "sync" || "$OP" = "download" ]; then
+    if [ "$OP" = "sync" ] || [ "$OP" = "download" ]; then
         preload_info_panel "Downloading $WHAT from the cloud"
-        ./rclone copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
+        "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
     fi
 }
 
-sync_dirs "saves" "$PROFILE/saves/" "$CLOUD_DIR/$NAME/saves/"
-sync_dirs "states" "$PROFILE/states/" "$CLOUD_DIR/$NAME/states/"
-sync_dirs "rom screens" "$PROFILE/romScreens/" "$CLOUD_DIR/$NAME/romScreens/"
+sync_dirs "saves" "saves/"
+sync_dirs "states" "states/"
+sync_dirs "rom screens" "romScreens/"
 
 #sync_dirs "ROMs" "$ROMS/" "$CLOUD_DIR/Roms/" "upload"
 
 # Smart sync of matching ROMs
 if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
     preload_info_panel "Searching for matching ROMs"
-    ./find-roms.sh -p "$PROFILE" -r "$ROMS" |
+    "$SCRIPT_DIR/find-roms.sh" -p "$PROFILE" -r "$ROMS" |
         while IFS= read -r rom_subpath; do
             preload_info_panel "Copying ROMs to the cloud\n$rom_subpath"
-            ./rclone copyto --update -P -L $RCLONE_OPTIONS "$ROMS/$rom_subpath" "$CLOUD_DIR/Roms/$rom_subpath" >>$LOG_FILE 2>&1 || exit_on_error "Failed to upload $rom_subpath"
+            "$RCLONE" copyto --update -P -L $RCLONE_OPTIONS "$ROMS/$rom_subpath" "$CLOUD_DIR/Roms/$rom_subpath" >>$LOG_FILE 2>&1 || exit_on_error "Failed to upload $rom_subpath"
         done
 fi
 
