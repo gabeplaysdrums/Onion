@@ -139,11 +139,11 @@ start=$(date +%s)
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
 log "Current time is $TIMESTAMP"
 
-# rclone
+# rclone check
 preload_info_panel "Checking cloud connection"
 "$RCLONE" $RCLONE_OPTIONS -vv lsd ${RCLONE_REMOTE}: >>$LOG_FILE 2>&1 || exit_on_error "Could not verify cloud connection"
 
-sync_dirs() {
+sync_profile_dir() {
     local WHAT=$1
     local REL_DIR=$2
     local OP=$3
@@ -169,11 +169,9 @@ sync_dirs() {
     fi
 }
 
-sync_dirs "saves" "saves/"
-sync_dirs "states" "states/"
-sync_dirs "rom screens" "romScreens/"
-
-#sync_dirs "ROMs" "$ROMS/" "$CLOUD_DIR/Roms/" "upload"
+sync_profile_dir "saves" "saves/"
+sync_profile_dir "states" "states/"
+sync_profile_dir "rom screens" "romScreens/"
 
 # Smart sync of matching ROMs
 if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
