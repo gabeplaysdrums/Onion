@@ -78,7 +78,7 @@ while [ $log_count -ge $MAX_LOG_FILES ]; do
     log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
 done
 
-RCLONE=$(which rclone)
+RCLONE=$(which rclone 2>/dev/null)
 if [ $? -ne 0 ]; then
     RCLONE="$SCRIPT_DIR/rclone"
 fi
@@ -134,7 +134,7 @@ elapsed_offset=$(expr $now - $start)
 if which ntpd; then
     preload_info_panel "Syncing clock to network time"
     export TZ=UTC-0
-    ntpd -n -q -N -p time.nist.gov >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
+    ntpd -n -q -N -p time.nist.gov -p 162.159.200.1 >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
     hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
 fi
 
