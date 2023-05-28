@@ -99,6 +99,8 @@ log "NAME: $NAME"
 TITLE="Syncing $NAME device"
 log $TITLE
 
+LIBPADSP="/mnt/SDCARD/miyoo/lib/libpadsp.so"
+
 preload_info_panel() {
     local MESSAGE=$1
     local PANEL_TITLE=$2
@@ -108,8 +110,8 @@ preload_info_panel() {
     fi
 
     log $MESSAGE
-    if [ -f "/mnt/SDCARD/miyoo/lib/libpadsp.so" ]; then
-        LD_PRELOAD=/mnt/SDCARD/miyoo/lib/libpadsp.so /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$PANEL_TITLE" -m "$MESSAGE" --auto &
+    if [ -f "$LIBPADSP" ]; then
+        LD_PRELOAD=$LIBPADSP /mnt/SDCARD/.tmp_update/bin/infoPanel -t "$PANEL_TITLE" -m "$MESSAGE" --auto &
     fi
 }
 
@@ -119,7 +121,9 @@ exit_on_error() {
     local MESSAGE=$1
     preload_info_panel "$MESSAGE" "Error"
     touch $ERROR_FLAG >/dev/null 2>&1
-    sleep 5
+    if [ -f "$LIBPADSP" ]; then
+        sleep 5
+    fi
     exit 0
 }
 
