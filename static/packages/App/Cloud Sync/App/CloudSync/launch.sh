@@ -162,14 +162,42 @@ sync_profile_dir() {
     log "CLOUD_DIR: $CLOUD_DIR"
     log "OP: $OP"
 
-    if [ "$OP" = "sync" ] || [ "$OP" = "upload" ]; then
+    local BISYNC_WORK_DIR="$WORK_DIR/bisync/$NAME/$REL_DIR"
+    log "BISYNC_WORK_DIR: $BISYNC_WORK_DIR"
+
+    if [ "$OP" = "upload" ]; then
         preload_info_panel "Uploading $WHAT to the cloud"
         "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
     fi
 
-    if [ "$OP" = "sync" ] || [ "$OP" = "download" ]; then
+    if [ "$OP" = "download" ]; then
         preload_info_panel "Downloading $WHAT from the cloud"
         "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
+    fi
+
+    if [ "$OP" = "sync" ]; then
+        preload_info_panel "Syncing $WHAT with the cloud"
+
+        "$RCLONE" mkdir $RCLONE_OPTIONS $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Failed to create cloud directory while syncing $WHAT"
+
+        local resync_option=--resync
+
+        if [ -d "$BISYNC_WORK_DIR" ]; then
+            resync_option=
+        else
+            mkdir -p "$BISYNC_WORK_DIR"
+        fi
+
+        "$RCLONE" bisync $resync_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
+
+        if [ $? -ne 0 ]; then
+            if [ -z "$resync_option" ]; then
+                log "WARNING: bisync failed.  Trying again with --resync"
+                "$RCLONE" bisync --resync $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
+            else
+                exit_on_error "Bidirectional sync failed while syncing $WHAT"
+            fi
+        fi
     fi
 }
 
