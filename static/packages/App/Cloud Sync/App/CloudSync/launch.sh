@@ -10,6 +10,7 @@ LOG_FILE_SUFFIX=.log
 MAX_LOG_FILES=10
 ERROR_FLAG=/tmp/cloud_sync_error
 PROFILE=/mnt/SDCARD/Saves/CurrentProfile
+DRY_RUN_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncDryRun
 SYNC_ROMS_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncRoms
 ROMS=/mnt/SDCARD/Roms
 RCLONE_REMOTE=cloud
@@ -189,21 +190,26 @@ sync_profile_dir() {
         "$RCLONE" mkdir $RCLONE_OPTIONS $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Failed to create cloud directory while syncing $WHAT"
 
         local resync_option=--resync
-
         if [ -d "$BISYNC_WORK_DIR" ]; then
             resync_option=
         else
             mkdir -p "$BISYNC_WORK_DIR"
         fi
 
-        "$RCLONE" bisync $resync_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
+        local dry_run_option=
+        if [ -f $DRY_RUN_CONFIG_FLAG ] || [ "$CLOUD_SYNC_DRY_RUN" = "true" ]; then
+            log "WARNING: Performing dry run"
+            dry_run_option=--dry-run
+        fi
+
+        "$RCLONE" bisync --verbose $resync_option $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
         local rclone_error=$?
 
         if [ $rclone_error -ne 0 ]; then
             log "rclone bisync failed with exit code $rclone_error"
             if [ $rclone_error -eq 2 ] && [ -z "$resync_option" ]; then
                 log "WARNING: bisync failed.  Trying again with --resync"
-                "$RCLONE" bisync --resync $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
+                "$RCLONE" bisync --verbose --resync $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
             else
                 exit_on_error "Bidirectional sync failed while syncing $WHAT"
             fi
@@ -215,7 +221,6 @@ sync_profile_dir() {
 # sync_profile_dir "states" "states/"
 # sync_profile_dir "rom screens" "romScreens/"
 sync_profile_dir "profile" "" "sync" "$SCRIPT_DIR/filter-list.txt"
-
 
 # Smart sync of matching ROMs
 if [ -f "$SYNC_ROMS_CONFIG_FLAG" ] || [ "$CLOUD_SYNC_ROMS" = "true" ]; then

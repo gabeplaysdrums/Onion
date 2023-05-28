@@ -1,3 +1,5 @@
+# exclude macos files
+- **/.DS_Store
 - saves/currentTime.txt
 - saves/playActivity_tmp.db
 - saves/PlayActivityBackup/**
