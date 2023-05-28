@@ -218,13 +218,26 @@ sync_profile_dir "profile" "" "sync" "$SCRIPT_DIR/filter-list.txt"
 
 
 # Smart sync of matching ROMs
-if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
+if [ -f "$SYNC_ROMS_CONFIG_FLAG" ] || [ "$CLOUD_SYNC_ROMS" = "true" ]; then
+    log "ROMS: $ROMS"
     preload_info_panel "Searching for matching ROMs"
+    ROMS_FILTER_LIST=/tmp/roms-filter-list.txt
+    echo "# roms matched to saves and states" >$ROMS_FILTER_LIST
+    chmod u+x "$SCRIPT_DIR/find-roms.sh"
     "$SCRIPT_DIR/find-roms.sh" -p "$PROFILE" -r "$ROMS" |
         while IFS= read -r rom_subpath; do
-            preload_info_panel "Copying ROMs to the cloud\n$rom_subpath"
-            "$RCLONE" copyto --update -P -L $RCLONE_OPTIONS "$ROMS/$rom_subpath" "$CLOUD_DIR/Roms/$rom_subpath" >>$LOG_FILE 2>&1 || exit_on_error "Failed to upload $rom_subpath"
+            echo "+ $rom_subpath" >>$ROMS_FILTER_LIST
+            preload_info_panel "Searching for matching ROMs\n$rom_subpath"
         done
+    echo "# exclude everything else" >>$ROMS_FILTER_LIST
+    echo "- **" >>$ROMS_FILTER_LIST
+    log "-- filter list begin --"
+    cat $ROMS_FILTER_LIST >>$LOG_FILE
+    log "-- filter list end --"
+    preload_info_panel "Uploading matching ROMs to the cloud"
+    "$RCLONE" copy --update -P -L --filter-from="$ROMS_FILTER_LIST" $RCLONE_OPTIONS "$ROMS" "$CLOUD_DIR/Roms" >>$LOG_FILE 2>&1 || exit_on_error "Failed to upload ROMs"
+    preload_info_panel "Downloading ROMs from the cloud"
+    "$RCLONE" copy --update -P -L $RCLONE_OPTIONS "$CLOUD_DIR/Roms" "$ROMS" >>$LOG_FILE 2>&1 || exit_on_error "Failed to download ROMs"
 fi
 
 now=$(date +%s)
