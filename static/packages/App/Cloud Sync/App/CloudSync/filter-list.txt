@@ -1,0 +1,8 @@
+- saves/currentTime.txt
+- saves/playActivity_tmp.db
+- saves/PlayActivityBackup/**
++ saves/**
++ states/**
++ romScreens/**
+# exclude everything else
+- *

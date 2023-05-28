@@ -151,9 +151,17 @@ sync_profile_dir() {
     local WHAT=$1
     local REL_DIR=$2
     local OP=$3
+    local FILTER_LIST=$4
 
     if [ -z "$OP" ]; then
         OP="sync"
+    fi
+
+    local filter_option=
+    if [ ! -z "$FILTER_LIST" ]; then
+        # Path to filter list cannot contain spaces
+        cp "$FILTER_LIST" /tmp/filter-list.txt
+        filter_option=--filters-file=/tmp/filter-list.txt
     fi
 
     local LOCAL_DIR=$(abs_path "$PROFILE/$REL_DIR")
@@ -167,12 +175,12 @@ sync_profile_dir() {
 
     if [ "$OP" = "upload" ]; then
         preload_info_panel "Uploading $WHAT to the cloud"
-        "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
+        "$RCLONE" copy --update -P -L $filter_option $RCLONE_OPTIONS $LOCAL_DIR $CLOUD_DIR >>$LOG_FILE 2>&1 || exit_on_error "Upload failed while syncing $WHAT"
     fi
 
     if [ "$OP" = "download" ]; then
         preload_info_panel "Downloading $WHAT from the cloud"
-        "$RCLONE" copy --update -P -L $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
+        "$RCLONE" copy --update -P -L $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Download failed while syncing $WHAT"
     fi
 
     if [ "$OP" = "sync" ]; then
@@ -188,12 +196,14 @@ sync_profile_dir() {
             mkdir -p "$BISYNC_WORK_DIR"
         fi
 
-        "$RCLONE" bisync $resync_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
+        "$RCLONE" bisync $resync_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
+        local rclone_error=$?
 
-        if [ $? -ne 0 ]; then
-            if [ -z "$resync_option" ]; then
+        if [ $rclone_error -ne 0 ]; then
+            log "rclone bisync failed with exit code $rclone_error"
+            if [ $rclone_error -eq 2 ] && [ -z "$resync_option" ]; then
                 log "WARNING: bisync failed.  Trying again with --resync"
-                "$RCLONE" bisync --resync $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
+                "$RCLONE" bisync --resync $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
             else
                 exit_on_error "Bidirectional sync failed while syncing $WHAT"
             fi
@@ -201,9 +211,11 @@ sync_profile_dir() {
     fi
 }
 
-sync_profile_dir "saves" "saves/"
-sync_profile_dir "states" "states/"
-sync_profile_dir "rom screens" "romScreens/"
+# sync_profile_dir "saves" "saves/"
+# sync_profile_dir "states" "states/"
+# sync_profile_dir "rom screens" "romScreens/"
+sync_profile_dir "profile" "" "sync" "$SCRIPT_DIR/filter-list.txt"
+
 
 # Smart sync of matching ROMs
 if [ -f "$SYNC_ROMS_CONFIG_FLAG" ]; then
