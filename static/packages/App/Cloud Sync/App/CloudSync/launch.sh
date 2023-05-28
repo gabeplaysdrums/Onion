@@ -59,8 +59,8 @@ mkdir -p "$WORK_DIR"
 
 LOGS_DIR=$(abs_path "$WORK_DIR/$LOGS_REL_DIR")
 mkdir -p "$LOGS_DIR"
-timestamp=$(date "+%Y%m%d-%H%M%S")
-LOG_FILE="$LOGS_DIR/$LOG_FILE_PREFIX-$timestamp.log"
+timestamp=$(date -d @$start "+%Y%m%d-%H%M%S")
+LOG_FILE="$LOGS_DIR/${LOG_FILE_PREFIX}-${timestamp}${LOG_FILE_SUFFIX}"
 echo "LOG_FILE: $LOG_FILE"
 echo $0 $* >$LOG_FILE
 
@@ -122,27 +122,53 @@ exit_on_error() {
     local MESSAGE=$1
     preload_info_panel "$MESSAGE" "Error"
     touch $ERROR_FLAG >/dev/null 2>&1
-    if [ -f "$LIBPADSP" ]; then
+    if [ -e "$LIBPADSP" ]; then
         sleep 5
     fi
     exit 0
 }
 
-now=$(date +%s)
-elapsed_offset=$(expr $now - $start)
+ntpd_offset=0
 
 # Quick time sync fix
 if which ntpd; then
     preload_info_panel "Syncing clock to network time"
+    log "Time before NTP sync is $timestamp"
     export TZ=UTC-0
-    ntpd -n -q -N -p time.nist.gov -p 162.159.200.1 >>$LOG_FILE 2>&1 || exit_on_error "NTPD failed"
+
+    NTPD_LOG=/tmp/ntpd.log
+    ntpd -n -q -N -p time.nist.gov -p 162.159.200.1 >$NTPD_LOG 2>&1
+    ntpd_error=$?
+    cat $NTPD_LOG >>$LOG_FILE
+    if [ $ntpd_error -ne 0 ]; then
+        exit_on_error "NTPD failed"
+    fi
     hwclock -w >>$LOG_FILE 2>&1 || exit_on_error "hwclock failed"
+    while IFS= read -r line; do
+        match=$(echo $line | grep -o -E "^ntpd: setting time to .* \(offset -?[0-9]+(\.[0-9]+)s\)")
+        if [ $? -eq 0 ]; then
+            log "found offset line in ntpd output"
+            # extract offset part
+            match=$(echo $match | grep -o -E "\(offset -?[0-9]+(\.[0-9]+)s\)")
+            # extract seconds part
+            match=$(echo $match | grep -o -E "[-]?[0-9]+" | head -1)
+            # set ntpd offset
+            ntpd_offset=$match
+        fi
+    done < $NTPD_LOG
+    log "ntpd offset is $ntpd_offset seconds"
+
+    if [ $ntpd_offset -ne 0 ]; then
+        # adjust log file name
+        old_log_file=$LOG_FILE
+        start=$(expr $start + $ntpd_offset)
+        timestamp=$(date -d @$start "+%Y%m%d-%H%M%S")
+        LOG_FILE="$LOGS_DIR/${LOG_FILE_PREFIX}-${timestamp}${LOG_FILE_SUFFIX}"
+        mv $old_log_file $LOG_FILE
+    fi
 fi
 
-start=$(date +%s)
-
-TIMESTAMP=$(date "+%Y-%m-%d %H:%M:%S")
-log "Current time is $TIMESTAMP"
+log "Current time is $timestamp"
 
 # rclone check
 preload_info_panel "Checking cloud connection"
@@ -217,9 +243,6 @@ sync_profile_dir() {
     fi
 }
 
-# sync_profile_dir "saves" "saves/"
-# sync_profile_dir "states" "states/"
-# sync_profile_dir "rom screens" "romScreens/"
 sync_profile_dir "profile" "" "sync" "$SCRIPT_DIR/filter-list.txt"
 
 # Smart sync of matching ROMs
@@ -246,5 +269,5 @@ if [ -f "$SYNC_ROMS_CONFIG_FLAG" ] || [ "$CLOUD_SYNC_ROMS" = "true" ]; then
 fi
 
 now=$(date +%s)
-elapsed=$(expr $elapsed_offset + $now - $start)
+elapsed=$(expr $now - $start)
 preload_info_panel "Success!\nSync took $elapsed seconds"
