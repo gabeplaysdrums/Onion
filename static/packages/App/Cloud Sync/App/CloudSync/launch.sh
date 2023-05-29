@@ -5,9 +5,12 @@ start=$(date +%s)
 NAME=
 CONFIG_FILE=/mnt/SDCARD/rclone.conf
 LOGS_REL_DIR=logs
-LOG_FILE_PREFIX="cloud_sync"
+LOG_FILE_PREFIX=cloud_sync
 LOG_FILE_SUFFIX=.log
-MAX_LOG_FILES=10
+LOG_FILE_TAIL_SUFFIX=.tail
+LOG_FILE_LATEST=cloud_sync.log.latest
+LOG_FILE_LATEST_TAIL=$LOG_FILE_LATEST.tail
+MAX_LOG_FILES=5
 ERROR_FLAG=/tmp/cloud_sync_error
 PROFILE=/mnt/SDCARD/Saves/CurrentProfile
 DRY_RUN_CONFIG_FLAG=/mnt/SDCARD/.tmp_update/config/.cloudSyncDryRun
@@ -69,19 +72,27 @@ log() {
     echo $*
 }
 
-write_log_tail() {
-    tail_log_file="$LOG_FILE.tail"
-    tail -10 $LOG_FILE >$tail_log_file
+finish_log() {
+    latest_log_file="$LOGS_DIR/$LOG_FILE_LATEST"
+    #ln -fs "$LOG_FILE" "$latest_log_file" >$LOG_FILE 2>&1
+    cp "$LOG_FILE" "$latest_log_file"
+
+    tail_log_file="${LOG_FILE}${LOG_FILE_TAIL_SUFFIX}"
+    tail -20 $LOG_FILE >$tail_log_file
+    latest_log_file_tail="$LOGS_DIR/$LOG_FILE_LATEST_TAIL"
+    #ln -fs "$tail_log_file" "$latest_log_file_tail" >$LOG_FILE 2>&1
+    cp "$tail_log_file" "$latest_log_file_tail"
 }
 
-LOGS_PATTERN=${LOGS_DIR}/${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX}
-declare -i log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
+logs_pattern=${LOGS_DIR}/${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX}
+log_count=$(ls -l $logs_pattern 2>/dev/null | wc -l)
 
 while [ $log_count -ge $MAX_LOG_FILES ]; do
-    oldest_log_file=$(ls -tr $LOGS_PATTERN | tr '\n' '\n' | head -1)
+    oldest_log_file=$(ls -tr $logs_pattern | tr '\n' '\n' | head -1)
     log "Deleting old log file: $oldest_log_file"
     rm -f $oldest_log_file
-    log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
+    rm -f "${oldest_log_file}${LOG_FILE_TAIL_SUFFIX}"
+    log_count=$(ls -l $logs_pattern 2>/dev/null | wc -l)
 done
 
 RCLONE=$(which rclone 2>/dev/null)
@@ -130,7 +141,7 @@ exit_on_error() {
     if [ -e "$LIBPADSP" ]; then
         sleep 5
     fi
-    write_log_tail
+    finish_log
     exit 1
 }
 
@@ -234,14 +245,14 @@ sync_profile_dir() {
             dry_run_option=--dry-run
         fi
 
-        "$RCLONE" bisync --verbose $resync_option $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
+        "$RCLONE" bisync --verbose --workdir $BISYNC_WORK_DIR $resync_option $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1
         local rclone_error=$?
 
         if [ $rclone_error -ne 0 ]; then
             log "rclone bisync failed with exit code $rclone_error"
             if [ $rclone_error -eq 2 ] && [ -z "$resync_option" ]; then
                 log "WARNING: bisync failed.  Trying again with --resync"
-                "$RCLONE" bisync --verbose --resync $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
+                "$RCLONE" bisync --verbose --workdir $BISYNC_WORK_DIR --resync $dry_run_option $filter_option $RCLONE_OPTIONS $CLOUD_DIR $LOCAL_DIR >>$LOG_FILE 2>&1 || exit_on_error "Bidirectional sync failed while syncing $WHAT"
             else
                 exit_on_error "Bidirectional sync failed while syncing $WHAT"
             fi
@@ -277,4 +288,4 @@ fi
 now=$(date +%s)
 elapsed=$(expr $now - $start)
 preload_info_panel "Success!\nSync took $elapsed seconds"
-tail_log_file
+finish_log

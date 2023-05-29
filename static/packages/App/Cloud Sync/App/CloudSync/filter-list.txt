@@ -1,5 +1,7 @@
 # exclude macos files
 - **/.DS_Store
+- **/.gpspImportDone
+- **/.netplay/**
 - saves/currentTime.txt
 - saves/playActivity_tmp.db
 - saves/PlayActivityBackup/**
