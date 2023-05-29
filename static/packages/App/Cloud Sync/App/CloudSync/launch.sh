@@ -69,6 +69,11 @@ log() {
     echo $*
 }
 
+write_log_tail() {
+    tail_log_file="$LOG_FILE.tail"
+    tail -10 $LOG_FILE >$tail_log_file
+}
+
 LOGS_PATTERN=${LOGS_DIR}/${LOG_FILE_PREFIX}*${LOG_FILE_SUFFIX}
 declare -i log_count=$(ls -l $LOGS_PATTERN 2>/dev/null | wc -l)
 
@@ -125,7 +130,8 @@ exit_on_error() {
     if [ -e "$LIBPADSP" ]; then
         sleep 5
     fi
-    exit 0
+    write_log_tail
+    exit 1
 }
 
 ntpd_offset=0
@@ -271,3 +277,4 @@ fi
 now=$(date +%s)
 elapsed=$(expr $now - $start)
 preload_info_panel "Success!\nSync took $elapsed seconds"
+tail_log_file
